@@ -26,7 +26,7 @@ def enviar_trama_radar(distancia_m, snr, forzar_error=False):
     alt_msb = (distancia_raw >> 8) & 0xFF
     
     # Algoritmo de Checksum: Suma aritmetica de los primeros 5 bytes acotada a 8 bits
-    checksum = (header + version + alt_lsb + alt_msb + snr) & 0xFF
+    checksum = (version + alt_lsb + alt_msb + snr) & 0xFF
     
     # Empaquetado en array de bytes puros (Formato binario)
     trama = bytearray([header, version, alt_lsb, alt_msb, snr, checksum])
@@ -37,7 +37,7 @@ def enviar_trama_radar(distancia_m, snr, forzar_error=False):
 # --- CONFIGURACIÓN DEL BUCLE DE ALTA PRECISIÓN (100 Hz) ---
 frecuencia = 100.0  
 intervalo = 1.0 / frecuencia  # 10 milisegundos
-proxima_ejecucion = time.time() + intervalo
+proxima_ejecucion = time.perf_counter() + intervalo
 
 print("====================================================")
 print(" Emulador HIL - Radar Ainstein US-D1 (100 Hz) Activo")
@@ -46,7 +46,7 @@ print("====================================================")
 
 try:
     while True:
-        t_actual = time.time()
+        t_actual = time.perf_counter()
         
         # Perfil de vuelo simulado: Oscilación sinusoidal entre 2 y 8 metros
         altitud_simulada = 5.0 + 3.0 * math.sin(t_actual * 0.5)
@@ -63,7 +63,7 @@ try:
             enviar_trama_radar(altitud_simulada, int(snr_simulado), forzar_error=False)
             
         # Control estricto del jitter del kernel de Linux
-        tiempo_espera = proxima_ejecucion - time.time()
+        tiempo_espera = proxima_ejecucion - time.perf_counter()
         if tiempo_espera > 0:
             time.sleep(tiempo_espera)
         

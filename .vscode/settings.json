@@ -5,13 +5,17 @@
     // ==========================================
 
     // Dibuja la línea de guía vertical en la columna 80
-    "editor.rulers": [80],
-    "editor.wordWrap": "wordWrapColumn",
-    "editor.wordWrapColumn": 80,
+    
+    
 
     "[python]": {
         "editor.tabSize": 2,
-        "editor.insertSpaces": true
+        "editor.insertSpaces": true,
+        "editor.indentSize": "tabSize",
+        "editor.formatOnSave": true,
+        "editor.rulers": [100],
+        "editor.wordWrap": "wordWrapColumn",
+        "editor.wordWrapColumn": 100
     },
 
     "[markdown]": {
