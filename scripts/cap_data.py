@@ -117,7 +117,8 @@ except serial.SerialException as e:
     print(f"Error de conexión: {e}")
 # Excepción que ocurre al pulsar "Ctrl+C"
 except KeyboardInterrupt:
-    print("\nDatos almacenados en 'datos_radar.csv'.")
+    print()
+    print(f"Datos almacenados en '{sys.argv[1]}.csv'.")
 # Para cualquier otra excepción
 except Exception as e:
     print("Error:", e)

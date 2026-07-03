@@ -37,6 +37,12 @@ Para realizar la emulación de este proyecto se van a utilizar los pies conectad
 
 Para usar el puerto serie hay que configurarlo previamente. Se recomienda ver el siguiente [vídeo](https://www.youtube.com/watch?v=oevxqPk78sM) donde se explica como configurar el puerto serie en la Rapsberry Pi 4.
 
+Además, para activar las UARTs de forma manual hay que ir al archivo `config.txt` (está en `/boot/config.txt` o en `/boot/firmware/config.txt`). Este archivo permite realizar modificaciones en el *device tree*. Hay que añadir 2 líneas en este archivo:
+* `enable_uart=1`: permite *mapear* la UART a los GPIOs correspondientes
+* `dtoverlay=uartX`: donde `X` representa el número de la UART que se quiere activar. En este caso se ha activado el 3
+
+**Nota**: Hay que tener en cuenta que cuando se activa el puerto serie siguiendo las indicaciones del vídeo hay 2 formas de acceder a ese dispositivo: `/dev/serial0` o `/dev/ttyAMA0`. En la RPi4 la notación va en orden, no en función del dispositivo activo, es decir, que para hacer referencia al puerto serie sobre el que está mapeada la UART3, si solo hay 2 UARTs activas se accede mediante `/dev/ttyAMA1`.
+
 ### Envío sencillo de datos entre el portátil y la Raspberry
 
 Antes de emular nada, es conveniente realizar una transmisión, utilizando el puerto serie, entre máquinas. De esta manera, podemos comprobar que los cables están correctamente conectados y que todo funciona correctamente.
@@ -45,12 +51,19 @@ Para ello usaremos la herramienta *minicom*. Se instala mediante el siguiente co
 
 Para usar correctamente los pines UART de la Raspberry se recomienda usar el proyecto [Raspberry Pi Pinout](https://pinout.xyz/). 
 
-![pinout_RPi4](doc/imgs/pinout_RPi4.png)
+|Pinout del la RPi4 | Pinout de la RPi4 destacando las UARTs|
+| ----------------- | --------------------------------------|
+|![pinout_RPi4](doc/imgs/pinout_RPi4.png)|![pinout_UARTs_RPi4](doc/imgs/pinout_UARTs_RPi4.png)|
 
-En este caso se usarán los siguientes pines:
+En este caso se usarán los siguientes pines para la UART0:
 * 9: *Ground* (Cable gris)
 * 8: *GPIO 14 (UART0 TX)* (Cable morado)
-* 10: *GPIO 15 (UART0 RX)* (Cable verde)
+* 10: *GPIO 15 (UART0 RX)* (Cable verde). Como nos interesa solo la transmisión este pin es irrelevante
+
+Para la UART3 (se ha escogido esta porque los pines **TX** están cerca de la UART0):
+* 9: *Ground* (Cable gris)
+* 7: *GPIO 4 (UART3 TX)* (Cable morado)
+* 29: *GPIO 5 (UART3 RX)* (Cable verde). Como nos interesa solo la transmisión este pin es irrelevante
 
 Teniendo claros los pines de la Raspberry, ahora hay que realizar la correcta conexión con el adaptador de USB a UART como se muestra en la imagen inferior:
 
