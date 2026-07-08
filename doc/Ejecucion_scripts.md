@@ -24,7 +24,18 @@ La ejecución de este script debe ser desde la carpeta raíz del repositorio (`E
 
 # [emulador_radar.py](../scripts/emulador_radar.py)
 
-*Script* encargado de emular las tramas de datos del radar desde la RPi4. Para ello, **desde la RPi4** se ejecuta el siguiente comando: `python3 emulador_radar.py`
+*Script* encargado de emular las tramas de datos del radar desde la RPi4. Para ello, **desde la RPi4** se ejecuta el siguiente comando: `python3 emulador_radar.py NOMBRE_PUERTO_USADO_EN_RPi4` donde `NOMBRE_PUERTO_USADO_EN_RPi4` corresponde con el nombre del puerto que se usa en la RPi4. La RPi4 debería estar configurada para usar 2 puertos:
+* `ttyAMA0` o `serial0` (son el mismo puerto): UART0
+* `ttyAMA1`: UART3 (si se configura como se especifica en el documento [Configuracion_RPi4](Configuracion_RPi4.md)) 
 
-# [emulador_gps.py](../scripts/emulador_gps.py)
+# [emulador_gps.py](../scripts/emulador_gps.py) o [emulador_gps_NEW.py](../scripts/emulador_gps_NEW.py)
 
+*DE MOMENTO ESTÁ LA VERSION NEW EN LA RPi4, YA SE ACTUALIZARÁ*
+
+*Script* encargado de emular las tramas de datos del gps desde la RPi4. Para ello, **desde la RPi4** se ejecuta el siguiente comando: `python3 emulador_gps_NEW.py`
+
+# Ejecución de 2 scripts a la vez
+
+Para ejecutar 2 scripts a la vez se tiene que usar el operador `&&` de la siguiente manera:
+
+`python3 emulador_radar
