@@ -20,7 +20,9 @@ except serial.SerialException as e:
 
 UBX_SYNC1, UBX_SYNC2 = 0xB5, 0x62
 CLASS_NAV, ID_PVT = 0x01, 0x07
-CLASS_RXM, ID_RAWX = 0x02, 0x15
+CLASS_RXM = 0x02
+ID_RAWX = 0x15
+ID_SFRBX = 0x13
 CLASS_CFG, ID_VALSET = 0x06, 0x8A
 CLASS_CFG_GET, ID_VALGET = 0x06, 0x8B
 CLASS_ACK, ID_ACK, ID_NAK = 0x05, 0x01, 0x00
@@ -28,19 +30,22 @@ CLASS_ACK, ID_ACK, ID_NAK = 0x05, 0x01, 0x00
 # --- Tabla de keyID relevantes (limitada a lo que el firmware real va a enviar) ---
 KEY_MSGOUT_NAV_PVT_UART1  = 0x20910007
 KEY_MSGOUT_RXM_RAWX_UART1 = 0x209102A5
+KEY_MSGOUT_RXM_SFRBX_UART1 = 0x20910232
 KEY_UART1_BAUDRATE        = 0x40520001
 
 TAMANO_VALOR = {
     KEY_MSGOUT_NAV_PVT_UART1:  1,  # U1
     KEY_MSGOUT_RXM_RAWX_UART1: 1,  # U1
+    KEY_MSGOUT_RXM_SFRBX_UART1: 1,  # U1
     KEY_UART1_BAUDRATE:        4,  # U4
 }
 
 # --- Estado interno de configuración del "receptor" emulado ---
-# Por defecto, replica el comportamiento real de fábrica: NAV-PVT y RAWX desactivados
+# Por defecto, replica el comportamiento real de fábrica: todos los mensajes UBX desactivados
 estado_config = {
     "nav_pvt_activo": False,
     "rawx_activo": False,
+    "sfrbx_activo": False,
     "baudrate_actual": args.baudrate_inicial,
 }
 lock_estado = threading.Lock()
@@ -132,6 +137,26 @@ def construir_rawx(rcv_tow, week, num_meas):
 
     return cabecera + bloques
 
+def construir_sfrbx(gnss_id, sv_id, sig_id, freq_id, num_words=8):
+    """
+    Payload de UBX-RXM-SFRBX: cabecera fija de 8 bytes + numWords palabras
+    de 4 bytes cada una, según [1] apartado 3.17.9, p. 201. El contenido de
+    'dwrd' es sintético (no decodificable como efeméride real): al igual que
+    las observables de RAWX, sirve para validar que el firmware parsea
+    correctamente el número variable de palabras según 'numWords', no para
+    un post-proceso PPK real (ver apartado 2.5 de la documentación).
+    """
+    chn = sv_id % 32
+    version = 0x02
+    reserved0 = 0x00
+
+    cabecera = struct.pack(
+        '<BBBBBBBB',
+        gnss_id, sv_id, sig_id, freq_id, num_words, chn, version, reserved0
+    )
+    dwrd = b''.join(struct.pack('<I', 0xABCD0000 + i) for i in range(num_words))
+    return cabecera + dwrd
+
 def checksum_ubx(datos):
     ck_a = ck_b = 0
     for b in datos:
@@ -180,6 +205,9 @@ def procesar_valset(payload):
             elif key_id == KEY_MSGOUT_RXM_RAWX_UART1:
                 estado_config["rawx_activo"] = (valor_bytes[0] > 0)
                 print(f"[CFG] RXM-RAWX {'activado' if estado_config['rawx_activo'] else 'desactivado'}")
+            elif key_id == KEY_MSGOUT_RXM_SFRBX_UART1:
+                estado_config["sfrbx_activo"] = (valor_bytes[0] > 0)
+                print(f"[CFG] RXM-SFRBX {'activado' if estado_config['sfrbx_activo'] else 'desactivado'}")
             elif key_id == KEY_UART1_BAUDRATE:
                 nuevo_baud = struct.unpack('<I', valor_bytes)[0]
                 print(f"[CFG] Solicitud de cambio de baud rate a {nuevo_baud}")
@@ -201,6 +229,8 @@ def valor_actual_clave(key_id):
             return bytes([1 if estado_config["nav_pvt_activo"] else 0])
         elif key_id == KEY_MSGOUT_RXM_RAWX_UART1:
             return bytes([1 if estado_config["rawx_activo"] else 0])
+        elif key_id == KEY_MSGOUT_RXM_SFRBX_UART1:
+            return bytes([1 if estado_config["sfrbx_activo"] else 0])
         elif key_id == KEY_UART1_BAUDRATE:
             return struct.pack('<I', estado_config["baudrate_actual"])
     return None
@@ -326,6 +356,7 @@ try:
         with lock_estado:
             pvt_activo = estado_config["nav_pvt_activo"]
             rawx_activo = estado_config["rawx_activo"]
+            sfrbx_activo = estado_config["sfrbx_activo"]
 
         if pvt_activo:
             lat_sim = lat0 + 0.0000005 * math.sin(t_transcurrido * 0.2)
@@ -338,7 +369,19 @@ try:
             payload_rawx = construir_rawx(itow_actual / 1000.0, semana_gps, args.num_sats)
             ser.write(construir_trama_ubx(CLASS_RXM, ID_RAWX, payload_rawx))
 
-        if not pvt_activo and not rawx_activo:
+        if sfrbx_activo:
+            # Una trama SFRBX por satélite simulado, replicando que cada subtrama
+            # de navegación procede de una única señal (a diferencia de RAWX, que
+            # agrupa todas las señales en un solo mensaje). Simplificación de la
+            # emulación: en el receptor real, las subtramas llegan a un ritmo mucho
+            # más lento que la tasa de navegación (segundos, no cada época); aquí se
+            # emiten a la misma cadencia que PVT/RAWX por simplicidad, suficiente
+            # para validar el parseo del firmware (ver apartado 2.5 del documento).
+            for i in range(args.num_sats):
+                payload_sfrbx = construir_sfrbx(gnss_id=0, sv_id=i + 1, sig_id=0, freq_id=0, num_words=8)
+                ser.write(construir_trama_ubx(CLASS_RXM, ID_SFRBX, payload_sfrbx))
+
+        if not pvt_activo and not rawx_activo and not sfrbx_activo:
             # Comportamiento de fábrica: emisión de NMEA simulado a baja frecuencia,
             # útil para validar que el firmware ignora correctamente tramas no-UBX
             # mientras espera a que su propia secuencia de configuración surta efecto.
