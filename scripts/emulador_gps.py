@@ -22,7 +22,6 @@ UBX_SYNC1, UBX_SYNC2 = 0xB5, 0x62
 CLASS_NAV, ID_PVT = 0x01, 0x07
 CLASS_RXM, ID_RAWX = 0x02, 0x15
 CLASS_CFG, ID_VALSET = 0x06, 0x8A
-CLASS_CFG_GET, ID_VALGET = 0x06, 0x8B
 CLASS_ACK, ID_ACK, ID_NAK = 0x05, 0x01, 0x00
 
 # --- Tabla de keyID relevantes (limitada a lo que el firmware real va a enviar) ---
@@ -188,56 +187,6 @@ def procesar_valset(payload):
 
     return True
 
-def valor_actual_clave(key_id):
-    """
-    Devuelve, en formato binario UBX, el valor ACTUALMENTE ACTIVO de una clave
-    de configuración, reflejando el estado interno del emulador. Se asume
-    equivalente a la capa RAM: es el valor que "vería" un CFG-VALGET con
-    layer=RAM en el receptor real, que es la capa relevante para que la
-    Teensy decida si necesita o no reconfigurar antes de empezar a registrar.
-    """
-    with lock_estado:
-        if key_id == KEY_MSGOUT_NAV_PVT_UART1:
-            return bytes([1 if estado_config["nav_pvt_activo"] else 0])
-        elif key_id == KEY_MSGOUT_RXM_RAWX_UART1:
-            return bytes([1 if estado_config["rawx_activo"] else 0])
-        elif key_id == KEY_UART1_BAUDRATE:
-            return struct.pack('<I', estado_config["baudrate_actual"])
-    return None
-
-def procesar_valget(payload):
-    """
-    Parsea un UBX-CFG-VALGET (petición) y construye la respuesta con los
-    pares clave-valor solicitados, replicando el comportamiento documentado
-    del receptor real (apartado 3.10.24 del Interface Description):
-    misma Class/ID en petición y respuesta, distinguidas por el byte
-    'version' (0x00 en la petición, 0x01 en la respuesta).
-    """
-    if len(payload) < 4:
-        return None  # trama mal formada -> se responderá con NAK
-
-    layer = payload[1]
-    position = struct.unpack('<H', payload[2:4])[0]
-    idx = 4
-    cfg_data = b''
-
-    while idx + 4 <= len(payload):
-        key_id = struct.unpack('<I', payload[idx:idx+4])[0]
-        idx += 4
-
-        valor = valor_actual_clave(key_id)
-        if valor is None:
-            # KeyID no reconocido por este emulador simplificado: el receptor
-            # real respondería con UBX-ACK-NAK a la petición completa.
-            print(f"[AVISO] VALGET solicita KeyID desconocido 0x{key_id:08X}")
-            return None
-
-        cfg_data += struct.pack('<I', key_id) + valor
-
-    # version=0x01 (respuesta), se ecoa la capa y la posición solicitadas
-    respuesta_payload = bytes([0x01, layer]) + struct.pack('<H', position) + cfg_data
-    return respuesta_payload
-
 def hilo_escucha_configuracion():
     """
     Hilo dedicado a escuchar la UART en busca de comandos UBX-CFG-VALSET
@@ -290,14 +239,6 @@ def hilo_escucha_configuracion():
                             solicitud_cambio_baud["pendiente"] = False
                         ser.baudrate = nuevo
                         print(f"[CFG] Baud rate del emulador conmutado a {nuevo}")
-
-                elif msg_class == CLASS_CFG_GET and msg_id == ID_VALGET:
-                    respuesta = procesar_valget(payload)
-                    if respuesta is not None:
-                        ser.write(construir_trama_ubx(CLASS_CFG_GET, ID_VALGET, respuesta))
-                        print("[CFG] VALGET respondido")
-                    else:
-                        enviar_ack(msg_class, msg_id, positivo=False)
             else:
                 enviar_ack(msg_class, msg_id, positivo=False)
 
