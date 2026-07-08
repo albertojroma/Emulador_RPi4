@@ -59,7 +59,7 @@ Para la UART3 (se ha escogido esta porque los pines **TX** están cerca de la UA
 
 Teniendo claros los pines de la Raspberry, ahora hay que realizar la correcta conexión con el adaptador de USB a UART como se muestra en la imagen inferior:
 
-![Conexionado_adaptador_RPi4](imgs/Conexionado_adaptador_RPi4.jpg)
+![Conexionado_adaptador_RPi4](imgs/Conexionado_adaptador_RPi4.png)
 
 A continuación, lanzamos `minicom` en cada máquina ejecutando el siguiente comando:
 
