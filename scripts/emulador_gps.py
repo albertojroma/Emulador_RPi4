@@ -11,6 +11,7 @@ Hay que destacar varios aspectos a la hora de formar paquetes:
 2. Las referencias en este documento pueden ser principalmente a 2 documentos (si hay más referencias se especifica el enlace):
   * u-blox F9 HPG 1.51 Interface Description: https://content.u-blox.com/sites/default/files/documents/u-blox-F9-HPG-1.51_InterfaceDescription_UBXDOC-963802114-13124.pdf
   * "ZED-F9P Integration manual": https://content.u-blox.com/sites/default/files/ZED-F9P_IntegrationManual_UBX-18010802.pdf 
+  * "ZED-F9P-15B Data Sheet": UBX-23009090, R04
 3. El campo `version` de cada tipo de paquete siempre tiene un valor fijo. Este esta especificado en el documento "Interface Description" de u-blox.
 4. Los campos `reservedX`, como son mensajes de salida da igual que valor tengan (ver 3.3.2 del "Interface Description" de u-blox).
 5. Los tipos de datos UBX estan especificados en el apartado 3.3.5 del "Interface Description" de u-blox.
@@ -28,12 +29,17 @@ import threading
 
 # --puerto: UART3 de la RPi4 (/dev/ttyAMA1). 
 # --baudrate_inicial: 38400, baudrate de fabrica (Integration Manual, apartado 3.1.3, p. 13).
-# --num_sats: satelites simulados en RAWX/SFRBX.
+# --num_sats: satelites simulados en RAWX/SFRBX (numero maximo, alcanzado tras --ttff).
+# --ttff: segundos simulados de arranque en frio hasta alcanzar --num_sats
+#         (ZED-F9P-15B Data Sheet UBX-23009090 R04, Tabla 2, fila "Cold start",
+#         columna "GPS" = 30 s -- unica constelacion que este emulador simula).
 parser = argparse.ArgumentParser(description="Emulador HIL - GPS UBX (ZED-F9P) con handshake de configuración")
 parser.add_argument("--puerto", default="/dev/ttyAMA1")
 parser.add_argument("--baudrate_inicial", type=int, default=38400,
                      help="Baud rate de arranque, replicando el comportamiento real de fábrica del ZED-F9P")
 parser.add_argument("--num_sats", type=int, default=10)
+parser.add_argument("--ttff", type=float, default=30.0,
+                     help="Segundos simulados de arranque en frio (TTFF) hasta alcanzar --num_sats")
 args = parser.parse_args()
 
 try:
@@ -96,6 +102,26 @@ lock_estado = threading.Lock()
 #*==============================================================================
 #*                                  Funciones
 #*==============================================================================
+
+#* ----------------------- Simulacion de arranque en frio ----------------------
+
+def num_satelites_activos(t_transcurrido):
+    """
+    @brief Numero de satelites simulados disponibles en el instante actual.
+    @param t_transcurrido Segundos desde el arranque del script (t_inicio).
+    @return int: numero de satelites, creciendo linealmente de 1 a args.num_sats
+    a lo largo de args.ttff segundos, y fijo en args.num_sats a partir de ahi.
+    @note Simplificacion: rampa lineal, no una curva de adquisicion GPS real
+    (los satelites reales se adquieren de uno en uno, a ritmos distintos, no
+    de forma uniforme). Sirve para comprobar que el firmware no asume un
+    numero fijo de mediciones por trama y maneja bien el tamanyo variable de
+    RAWX/SFRBX de una epoca a otra -- no pretende replicar fisicamente un
+    arranque en frio real.
+    """
+    if t_transcurrido >= args.ttff:
+        return args.num_sats
+    fraccion = t_transcurrido / args.ttff
+    return max(1, int(args.num_sats * fraccion) + 1)
 
 #* ------------------------- Construccion de tramas ----------------------------
 
@@ -413,7 +439,10 @@ def hilo_escucha_configuracion():
     buffer = bytearray()
     while True:
         try:
-            #todo averiguar el tamanyo maximo de las tramas que se pueden recibir
+            # 64 es solo cuantos bytes se intentan leer de una vez por llamada 
+            # al sistema (valor de conveniencia, potencia de 2); NO limita el 
+            # tamanyo maximo de trama que el parser puede procesar, porque 
+            # 'buffer' acumula datos entre llamadas sucesivas a esta linea.
             datos = ser.read(64)
         except serial.SerialException:
             break
@@ -425,20 +454,15 @@ def hilo_escucha_configuracion():
             # Se busca la posicion de los preambulos 0xB562 de las tramas UBX
             idx_sync = buffer.find(bytes([UBX_SYNC1, UBX_SYNC2]))
             
-            #todo Terminar de decidir si lo de < 8 es valido
             # Si el indice es -1 o el tamanyo del buffer - indice es menor a 8 
-            # se sale del bucle
-            if idx_sync == -1 or len(buffer) - idx_sync < 8:
+            # se sale del bucle. 8 es el numero de bytes minimo que puede 
+            # tener una trama. Esto ocurre si no hay payload
+            if idx_sync == -1 or len(buffer) - idx_sync < (bytes_PrePayload+2):
                 break
             
             # Si el indice es > a 0 se limpia lo que haya antes del indice
             if idx_sync > 0:
                 del buffer[:idx_sync]
-
-            # todo Averiguar si tengo que borrar esta trama
-            # Si el tamanyo es menor a 6 se sale del bucle
-            if len(buffer) < bytes_PrePayload:
-                break
             
             # Localizados los preambulos, se identifica la clase e 
             # identificador recibidos asi como la ongitud
@@ -459,7 +483,7 @@ def hilo_escucha_configuracion():
             # Se comprueba si el checksum es correcto
             if ck_a_calc == ck_a_rx and ck_b_calc == ck_b_rx:
                 # Se comprueba que mensaje se ha recibido. En este emulador 
-                # solo hay 2 posibilidades: UBX-CFG-VALSET o UBX-CFG-VALGET
+                #! solo hay 2 posibilidades: UBX-CFG-VALSET o UBX-CFG-VALGET
                 if msg_class == CLASS_CFG and msg_id == ID_VALSET:
                     # ok = procesar_valset(payload)
                     enviar_ack(msg_class, msg_id, positivo=procesar_valset(payload))
@@ -490,6 +514,10 @@ def hilo_escucha_configuracion():
                         print("[CFG] VALGET respondido")
                     else:
                         enviar_ack(msg_class, msg_id, positivo=False)
+                else:
+                    print("Mensaje recibido no contemplado en el emulador:")
+                    print(f"Clase: {msg_class}")
+                    print(f"Emulador: {msg_id}")
             else:
                 enviar_ack(msg_class, msg_id, positivo=False)
             
@@ -515,8 +543,11 @@ t_inicio = time.perf_counter()
 # datos inventados
 semana_gps = 2320
 itow_inicial_ms = 300_000_000
-#todo habria que tener en cuenta tambien el tema de que el gps tarda en arrancar, y cuando se alimente el sistema todo se va a alimentar a la vez pero el gps tarda un tiempo en tomar bien los datos si no estoy equivocado
-
+# El arranque en frio del GPS (tiempo hasta contar con --num_sats satelites)
+# se simula con num_satelites_activos(), usando t_inicio como referencia (el
+# arranque del propio script, no el instante en que la Teensy activa RAWX/
+# SFRBX) -- replica que el TTFF del GPS cuenta desde que se le aplica
+# alimentacion, no desde que se le pide configuracion.
 
 try:
     while True:
@@ -530,15 +561,18 @@ try:
             rawx_activo = estado_config["rawx_activo"]
             sfrbx_activo = estado_config["sfrbx_activo"]
 
+        # Numero de satelites simulados en esta epoca, segun la rampa de TTFF
+        n_sats_actual = num_satelites_activos(t_transcurrido)
+
         if rawx_activo:
-            payload_rawx = construir_rawx(itow_actual / 1000.0, semana_gps, args.num_sats)
+            payload_rawx = construir_rawx(itow_actual / 1000.0, semana_gps, n_sats_actual)
             # Se envia la trama construida
             ser.write(construir_trama_ubx(CLASS_RXM, ID_RAWX, payload_rawx))
 
         if sfrbx_activo:
             # Una trama SFRBX por satélite simulado, replicando que cada subtrama de navegación procede de una única señal (a diferencia de RAWX, que agrupa todas las señales en un solo mensaje). 
             # Simplificación de la emulación: en el receptor real, las subtramas llegan a un ritmo mucho más lento que la tasa de navegación (segundos, no cada época); aquí se emiten a la misma cadencia que RAWX por simplicidad, suficiente para validar el parseo del firmware (ver apartado 2.5 del documento).
-            for i in range(args.num_sats):
+            for i in range(n_sats_actual):
                 payload_sfrbx = construir_sfrbx(gnssId=0, svId=i + 1, sigId=0, freqId=0, num_words=8)
                 ser.write(construir_trama_ubx(CLASS_RXM, ID_SFRBX, payload_sfrbx))
 
